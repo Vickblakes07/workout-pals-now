@@ -69,11 +69,9 @@ const Navbar = () => {
                 {link.label}
               </Link>
             ))}
-            <Link to="/auth" onClick={() => setOpen(false)}>
-              <Button variant="hero" className="w-full">
-                Join Now
-              </Button>
-            </Link>
+            <div onClick={() => setOpen(false)}>
+              <UserMenu />
+            </div>
           </div>
         </div>
       )}
