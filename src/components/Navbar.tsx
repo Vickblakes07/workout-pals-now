@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { Menu, X, Dumbbell } from "lucide-react";
+import UserMenu from "@/components/UserMenu";
 
 const navLinks = [
   { label: "Home", path: "/" },
@@ -39,11 +39,7 @@ const Navbar = () => {
               {link.label}
             </Link>
           ))}
-          <Link to="/auth">
-            <Button variant="hero" size="sm">
-              Join Now
-            </Button>
-          </Link>
+          <UserMenu />
         </div>
 
         {/* Mobile toggle */}
@@ -73,11 +69,9 @@ const Navbar = () => {
                 {link.label}
               </Link>
             ))}
-            <Link to="/auth" onClick={() => setOpen(false)}>
-              <Button variant="hero" className="w-full">
-                Join Now
-              </Button>
-            </Link>
+            <div onClick={() => setOpen(false)}>
+              <UserMenu />
+            </div>
           </div>
         </div>
       )}
