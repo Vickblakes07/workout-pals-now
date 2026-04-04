@@ -39,11 +39,7 @@ const Navbar = () => {
               {link.label}
             </Link>
           ))}
-          <Link to="/auth">
-            <Button variant="hero" size="sm">
-              Join Now
-            </Button>
-          </Link>
+          <UserMenu />
         </div>
 
         {/* Mobile toggle */}
