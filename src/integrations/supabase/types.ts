@@ -49,6 +49,27 @@ export type Database = {
           },
         ]
       }
+      gym_checkins: {
+        Row: {
+          checked_in_at: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          checked_in_at?: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          checked_in_at?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       gym_classes: {
         Row: {
           category: string
