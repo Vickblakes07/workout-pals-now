@@ -2,12 +2,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { motion } from "framer-motion";
-import { Calendar, Dumbbell, CreditCard, Trophy, Loader2, X } from "lucide-react";
+import { Calendar, Dumbbell, CreditCard, Clock, Loader2, X, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { format, differenceInDays, isPast } from "date-fns";
 
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -38,6 +39,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [membership, setMembership] = useState<Membership | null>(null);
+  const [checkinCount, setCheckinCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,7 +51,7 @@ const Dashboard = () => {
   }, [user, authLoading]);
 
   const fetchData = async () => {
-    const [bookingsRes, membershipRes] = await Promise.all([
+    const [bookingsRes, membershipRes, checkinsRes] = await Promise.all([
       supabase
         .from("class_bookings")
         .select("*, gym_classes(name, category, day_of_week, start_time, end_time, trainers(full_name))")
@@ -62,10 +64,27 @@ const Dashboard = () => {
         .eq("user_id", user!.id)
         .eq("status", "active")
         .maybeSingle(),
+      supabase
+        .from("gym_checkins")
+        .select("id", { count: "exact" })
+        .eq("user_id", user!.id),
     ]);
     setBookings((bookingsRes.data as unknown as Booking[]) || []);
     setMembership((membershipRes.data as unknown as Membership) || null);
+    setCheckinCount(checkinsRes.count || 0);
     setLoading(false);
+  };
+
+  const handleCheckin = async () => {
+    const { error } = await supabase
+      .from("gym_checkins")
+      .insert({ user_id: user!.id });
+    if (error) {
+      toast.error("Check-in failed");
+    } else {
+      toast.success("Checked in! Welcome to the gym 💪");
+      fetchData();
+    }
   };
 
   const cancelBooking = async (bookingId: string) => {
@@ -83,9 +102,26 @@ const Dashboard = () => {
 
   const displayName = profile?.full_name || user?.email?.split("@")[0] || "Member";
 
+  // Subscription expiry info
+  const daysLeft = membership ? differenceInDays(new Date(membership.end_date), new Date()) : null;
+  const isExpired = membership ? isPast(new Date(membership.end_date)) : false;
+  const expiryLabel = membership
+    ? isExpired
+      ? "Expired"
+      : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} left`
+    : "No plan";
+
   const stats = [
-    { label: "Active Bookings", value: bookings.length.toString(), icon: Calendar, color: "text-emerald-400" },
+    { label: "Gym Visits", value: checkinCount.toString(), icon: Dumbbell, color: "text-emerald-400" },
+    { label: "Active Bookings", value: bookings.length.toString(), icon: Calendar, color: "text-sky-400" },
     { label: "Membership", value: membership?.membership_plans?.name || "None", icon: CreditCard, color: "text-amber-400" },
+    {
+      label: "Subscription Expires",
+      value: membership ? format(new Date(membership.end_date), "dd MMM yyyy") : "N/A",
+      icon: Clock,
+      color: isExpired ? "text-red-400" : "text-emerald-400",
+      subtitle: expiryLabel,
+    },
   ];
 
   if (authLoading || loading) {
@@ -101,15 +137,20 @@ const Dashboard = () => {
       <Navbar />
       <div className="pt-24 pb-16">
         <div className="container mx-auto px-4">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <p className="text-primary font-semibold tracking-widest uppercase text-sm mb-2">Dashboard</p>
-            <h1 className="font-display text-4xl md:text-6xl text-foreground mb-2">
-              WELCOME, {displayName.toUpperCase()}
-            </h1>
-            <p className="text-muted-foreground mb-8">Track your fitness journey and manage your bookings.</p>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+            <div>
+              <p className="text-primary font-semibold tracking-widest uppercase text-sm mb-2">Dashboard</p>
+              <h1 className="font-display text-4xl md:text-6xl text-foreground mb-2">
+                WELCOME, {displayName.toUpperCase()}
+              </h1>
+              <p className="text-muted-foreground">Track your fitness journey and manage your bookings.</p>
+            </div>
+            <Button variant="hero" onClick={handleCheckin} className="gap-2 shrink-0">
+              <LogIn className="h-4 w-4" /> Check In
+            </Button>
           </motion.div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
             {stats.map((stat, i) => (
               <motion.div
                 key={stat.label}
@@ -123,6 +164,11 @@ const Dashboard = () => {
                   <span className="text-sm text-muted-foreground">{stat.label}</span>
                 </div>
                 <p className="font-display text-3xl text-foreground">{stat.value}</p>
+                {"subtitle" in stat && stat.subtitle && (
+                  <p className={`text-xs mt-1 ${isExpired ? "text-red-400 font-semibold" : "text-muted-foreground"}`}>
+                    {stat.subtitle}
+                  </p>
+                )}
               </motion.div>
             ))}
           </div>
