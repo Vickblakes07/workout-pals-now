@@ -2,22 +2,124 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Flame, Zap, Wind, Waves, Swords, Heart, Clock, Users } from "lucide-react";
-import { useState } from "react";
+import { Clock, Users, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
-const allClasses = [
-  { name: "HIIT Blast", icon: Flame, time: "Mon/Wed/Fri 6:00 AM", slots: 5, intensity: "High", duration: "45 min", trainer: "Tunde Bakare", description: "High-intensity interval training to torch calories and build endurance." },
-  { name: "Power Lifting", icon: Zap, time: "Tue/Thu 7:00 AM", slots: 8, intensity: "Extreme", duration: "60 min", trainer: "Adaeze Okoro", description: "Master the deadlift, squat, and bench press with expert coaching." },
-  { name: "Yoga Flow", icon: Wind, time: "Daily 8:00 AM", slots: 12, intensity: "Low", duration: "60 min", trainer: "Chinelo Nwankwo", description: "Find your inner peace with flowing sequences and deep stretches." },
-  { name: "Aqua Fitness", icon: Waves, time: "Mon/Wed 5:00 PM", slots: 10, intensity: "Medium", duration: "45 min", trainer: "Emeka Agu", description: "Low-impact water-based exercises for full-body conditioning." },
-  { name: "Boxing", icon: Swords, time: "Tue/Thu/Sat 6:00 PM", slots: 6, intensity: "High", duration: "60 min", trainer: "Tunde Bakare", description: "Learn boxing fundamentals while getting an incredible workout." },
-  { name: "Cardio Dance", icon: Heart, time: "Fri/Sat 10:00 AM", slots: 15, intensity: "Medium", duration: "50 min", trainer: "Chinelo Nwankwo", description: "Dance your way to fitness with high-energy choreography." },
-];
+const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const categories = ["All", "HIIT", "Yoga", "Boxing", "Strength", "CrossFit", "Cardio"];
+
+interface GymClass {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  max_slots: number;
+  trainers: { full_name: string } | null;
+  booked_count: number;
+}
 
 const Classes = () => {
   const [filter, setFilter] = useState("All");
-  const levels = ["All", "Low", "Medium", "High", "Extreme"];
-  const filtered = filter === "All" ? allClasses : allClasses.filter((c) => c.intensity === filter);
+  const [classes, setClasses] = useState<GymClass[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [bookingId, setBookingId] = useState<string | null>(null);
+  const [userBookings, setUserBookings] = useState<string[]>([]);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    fetchClasses();
+    if (user) fetchUserBookings();
+  }, [user]);
+
+  const fetchClasses = async () => {
+    const { data, error } = await supabase
+      .from("gym_classes")
+      .select("*, trainers(full_name)")
+      .eq("is_active", true);
+
+    if (error) {
+      toast.error("Failed to load classes");
+      setLoading(false);
+      return;
+    }
+
+    // Get booking counts
+    const { data: bookings } = await supabase
+      .from("class_bookings")
+      .select("class_id")
+      .eq("status", "booked");
+
+    const countMap: Record<string, number> = {};
+    bookings?.forEach((b) => {
+      countMap[b.class_id] = (countMap[b.class_id] || 0) + 1;
+    });
+
+    setClasses(
+      (data || []).map((c) => ({
+        ...c,
+        trainers: c.trainers as { full_name: string } | null,
+        booked_count: countMap[c.id] || 0,
+      }))
+    );
+    setLoading(false);
+  };
+
+  const fetchUserBookings = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("class_bookings")
+      .select("class_id")
+      .eq("user_id", user.id)
+      .eq("status", "booked");
+    setUserBookings(data?.map((b) => b.class_id) || []);
+  };
+
+  const handleBook = async (classId: string) => {
+    if (!user) {
+      toast.error("Please sign in to book a class");
+      return;
+    }
+    setBookingId(classId);
+    const { error } = await supabase.from("class_bookings").insert({
+      class_id: classId,
+      user_id: user.id,
+    });
+    if (error) {
+      toast.error("Booking failed. You may already have a booking.");
+    } else {
+      toast.success("Class booked successfully! 🎉");
+      fetchClasses();
+      fetchUserBookings();
+    }
+    setBookingId(null);
+  };
+
+  const handleCancel = async (classId: string) => {
+    if (!user) return;
+    setBookingId(classId);
+    const { error } = await supabase
+      .from("class_bookings")
+      .update({ status: "cancelled" })
+      .eq("class_id", classId)
+      .eq("user_id", user.id)
+      .eq("status", "booked");
+    if (error) {
+      toast.error("Failed to cancel booking");
+    } else {
+      toast.success("Booking cancelled");
+      fetchClasses();
+      fetchUserBookings();
+    }
+    setBookingId(null);
+  };
+
+  const filtered = filter === "All" ? classes : classes.filter((c) => c.category === filter);
 
   return (
     <div className="min-h-screen bg-background">
@@ -30,46 +132,83 @@ const Classes = () => {
           </motion.div>
 
           <div className="flex flex-wrap justify-center gap-3 mb-12">
-            {levels.map((l) => (
+            {categories.map((l) => (
               <Button key={l} variant={filter === l ? "hero" : "secondary"} size="sm" onClick={() => setFilter(l)}>
                 {l}
               </Button>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-            {filtered.map((cls, i) => (
-              <motion.div
-                key={cls.name}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.1 }}
-                className="bg-card rounded-xl p-6 border border-border hover:border-primary/50 transition-all"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="h-14 w-14 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <cls.icon className="h-7 w-7 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-display text-2xl text-foreground">{cls.name}</h3>
-                    <span className="text-xs text-muted-foreground">with {cls.trainer}</span>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground mb-4">{cls.description}</p>
-                <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mb-4">
-                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {cls.duration}</span>
-                  <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {cls.slots} slots</span>
-                  <span className={`px-2 py-0.5 rounded-full ${cls.intensity === "High" || cls.intensity === "Extreme" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                    {cls.intensity}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">{cls.time}</span>
-                  <Button variant="hero" size="sm">Book Now</Button>
-                </div>
-              </motion.div>
-            ))}
-          </div>
+          {loading ? (
+            <div className="flex justify-center py-20">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+              {filtered.map((cls, i) => {
+                const slotsLeft = cls.max_slots - cls.booked_count;
+                const isBooked = userBookings.includes(cls.id);
+                return (
+                  <motion.div
+                    key={cls.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.1 }}
+                    className="bg-card rounded-xl p-6 border border-border hover:border-primary/50 transition-all"
+                  >
+                    <div className="mb-4">
+                      <h3 className="font-display text-2xl text-foreground">{cls.name}</h3>
+                      <span className="text-xs text-muted-foreground">
+                        with {cls.trainers?.full_name || "TBD"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-4">{cls.description}</p>
+                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mb-4">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {cls.start_time.slice(0, 5)} – {cls.end_time.slice(0, 5)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3 w-3" />
+                        {slotsLeft} / {cls.max_slots} slots
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                        {cls.category}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">{dayNames[cls.day_of_week]}</span>
+                      {isBooked ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={bookingId === cls.id}
+                          onClick={() => handleCancel(cls.id)}
+                        >
+                          {bookingId === cls.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cancel Booking"}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="hero"
+                          size="sm"
+                          disabled={slotsLeft <= 0 || bookingId === cls.id}
+                          onClick={() => handleBook(cls.id)}
+                        >
+                          {bookingId === cls.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : slotsLeft <= 0 ? (
+                            "Full"
+                          ) : (
+                            "Book Now"
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
       <Footer />
