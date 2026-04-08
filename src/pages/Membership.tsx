@@ -3,11 +3,13 @@ import Footer from "@/components/Footer";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Check, Loader2, Crown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+
+const PAYSTACK_PUBLIC_KEY = "pk_test_da8921fc77480012e89f6888e582a616ddf1bab3";
 
 interface Plan {
   id: string;
@@ -21,8 +23,10 @@ interface Plan {
 const Membership = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [paying, setPaying] = useState<string | null>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     supabase
@@ -36,14 +40,104 @@ const Membership = () => {
       });
   }, []);
 
-  const handleSelect = (planId: string) => {
+  // Handle Paystack callback - verify payment when redirected back
+  const verifyPayment = useCallback(async (reference: string) => {
+    try {
+      toast.loading("Verifying your payment...", { id: "verify" });
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paystack-verify`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ reference }),
+        }
+      );
+
+      const result = await res.json();
+
+      if (res.ok && result.success) {
+        toast.success("Membership activated! 🎉 Welcome aboard!", { id: "verify" });
+        // Clear URL params
+        setSearchParams({});
+        // Redirect to dashboard after short delay
+        setTimeout(() => navigate("/dashboard"), 2000);
+      } else {
+        toast.error(result.error || "Payment verification failed", { id: "verify" });
+      }
+    } catch {
+      toast.error("Could not verify payment. Please contact support.", { id: "verify" });
+    }
+  }, [navigate, setSearchParams]);
+
+  useEffect(() => {
+    const reference = searchParams.get("reference");
+    const isCallback = searchParams.get("payment") === "callback";
+    if (reference && isCallback && user) {
+      verifyPayment(reference);
+    }
+  }, [searchParams, user, verifyPayment]);
+
+  const handleSelect = async (planId: string) => {
     if (!user) {
       toast.error("Please sign in first");
       navigate("/auth");
       return;
     }
-    // Stripe integration will go here
-    toast.info("Payment integration coming soon! 🚧");
+
+    setPaying(planId);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paystack-initialize`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ plan_id: planId }),
+        }
+      );
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || "Failed to initialize payment");
+      }
+
+      // Use Paystack Popup
+      const handler = (window as any).PaystackPop.setup({
+        key: PAYSTACK_PUBLIC_KEY,
+        email: user.email,
+        amount: plans.find((p) => p.id === planId)!.price * 100,
+        currency: "NGN",
+        ref: result.reference,
+        callback: (response: { reference: string }) => {
+          verifyPayment(response.reference);
+        },
+        onClose: () => {
+          setPaying(null);
+          toast.info("Payment cancelled");
+        },
+      });
+      handler.openIframe();
+    } catch (err: any) {
+      toast.error(err.message || "Payment failed");
+    } finally {
+      setPaying(null);
+    }
   };
 
   return (
@@ -99,8 +193,13 @@ const Membership = () => {
                     variant={plan.is_popular ? "hero" : "secondary"}
                     className="w-full"
                     onClick={() => handleSelect(plan.id)}
+                    disabled={paying !== null}
                   >
-                    Get Started
+                    {paying === plan.id ? (
+                      <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...</>
+                    ) : (
+                      "Get Started"
+                    )}
                   </Button>
                 </motion.div>
               ))}
