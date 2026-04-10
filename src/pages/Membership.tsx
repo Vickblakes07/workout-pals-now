@@ -92,38 +92,27 @@ const Membership = () => {
       return;
     }
 
+    const plan = plans.find((p) => p.id === planId);
+    if (!plan) return;
+
     setPaying(planId);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
+      // Generate a unique reference client-side
+      const reference = `pay_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paystack-initialize`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ plan_id: planId }),
-        }
-      );
-
-      const result = await res.json();
-
-      if (!res.ok) {
-        throw new Error(result.error || "Failed to initialize payment");
-      }
-
-      // Use Paystack Popup
       const handler = (window as any).PaystackPop.setup({
         key: PAYSTACK_PUBLIC_KEY,
         email: user.email,
-        amount: plans.find((p) => p.id === planId)!.price * 100,
+        amount: Math.round(plan.price * 100), // Naira to kobo
         currency: "NGN",
-        ref: result.reference,
+        ref: reference,
+        metadata: {
+          user_id: user.id,
+          plan_id: plan.id,
+          plan_name: plan.name,
+          duration_months: plan.duration_months,
+        },
         callback: (response: { reference: string }) => {
           verifyPayment(response.reference);
         },
@@ -135,7 +124,6 @@ const Membership = () => {
       handler.openIframe();
     } catch (err: any) {
       toast.error(err.message || "Payment failed");
-    } finally {
       setPaying(null);
     }
   };
